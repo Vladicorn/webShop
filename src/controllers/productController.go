@@ -5,6 +5,7 @@ import (
 	"casic/src/models"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"sort"
 	"strconv"
@@ -48,6 +49,7 @@ func GetProduct(c *fiber.Ctx) error {
 }
 
 func UpdateProduct(c *fiber.Ctx) error {
+
 	id, _ := strconv.Atoi(c.Params("id"))
 	var data map[string]string
 	if err := c.BodyParser(&data); err != nil {
@@ -55,6 +57,7 @@ func UpdateProduct(c *fiber.Ctx) error {
 	}
 
 	price, _ := strconv.ParseFloat(data["price"], 64)
+	fmt.Println(data["price"])
 	product := models.Product{
 		Id:          uint(id),
 		Title:       data["title"],
@@ -66,11 +69,17 @@ func UpdateProduct(c *fiber.Ctx) error {
 	if err := database.UpdateDBProduct(&product); err != nil {
 		return err
 	}
+
+	go deleteCache("product_front")
+	go deleteCache("product_back")
 	return c.JSON(fiber.Map{
 		"message": "Success",
 	})
 }
-
+func deleteCache(key string) {
+	time.Sleep(3 * time.Second)
+	database.Cache.Del(context.Background(), key)
+}
 func DeleteProduct(c *fiber.Ctx) error {
 	id, _ := strconv.Atoi(c.Params("id"))
 
@@ -159,13 +168,22 @@ func ProductBackend(c *fiber.Ctx) error {
 		})
 	}
 
-	page, _ := strconv.Atoi(c.Query("page"))
+	page, _ := strconv.Atoi(c.Query("page", "1"))
 	totalPage := len(filterproducts)
 	perPage := 9
 	var data []models.Product
-	if totalPage <= page*perPage {
-
+	if totalPage <= page*perPage && totalPage >= (page-1)*perPage {
+		data = filterproducts[(page-1)*perPage : totalPage]
+	} else if totalPage >= page*perPage {
+		data = filterproducts[(page-1)*perPage : page*perPage]
+	} else {
+		data = []models.Product{}
 	}
 
-	return c.JSON(filterproducts)
+	return c.JSON(fiber.Map{
+		"data":      data,
+		"total":     totalPage,
+		"page":      page,
+		"last_page": totalPage/perPage + 1,
+	})
 }
